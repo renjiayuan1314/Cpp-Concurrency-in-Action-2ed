@@ -26,10 +26,14 @@ struct A {
 
 int main() {
   A a;
+  // dean, In this case, the supplied function object is copied into the storage
+  // belonging to the newly created thread of execution and invoked from there.
   std::thread t1(a);  // 会调用 A 的拷贝构造函数
+  // dean, 声明名为 t2 的函数, 其参数类型为一个(返回类型为A的)函数指针
   std::thread t2(A());  // most vexing parse，声明名为 t2 参数类型为 A 的函数
   std::thread t3{A()};
   std::thread t4((A()));
+  // dean, 这里为什么不是: []() {xxx}  , 小括号?
   std::thread t5{[] { std::cout << 1; }};
   t1.join();
   t3.join();
@@ -103,6 +107,40 @@ int main() {
 }
 ```
 
+* dean, The use of try/catch blocks is verbose. 用RAII思想把线程放到类里面, 在析构的时候join. 正常情况下, 下面代码在主线程结束的时候会按初始化顺序倒过来析构, 第一个就是g, 然后会等待线程结束, 然后是t, 然后是my_func. 不正常情况下主线程do_something_in_current_thread有异常了也是一样. 安全.
+
+```cpp
+class thread_guard {
+  std::thread& t;
+public:
+  explicit thread_guard(std::thread& t_) : t(t_) {}
+  ~thread_guard() {
+    if(t.joinable()) {
+      t.join();
+    }
+  }
+  thread_guard(thread_guard const&)=delete;
+  thread_guard& operator=(thread_guard const&)=delete;
+};
+class func {
+  int& i;
+  func(int& i_) : i(i_) {}
+  void operator()() {
+    for(unsigned j=0;j<1000000;++j) {
+      do_something(i);
+    }
+  }
+};
+void f()
+{
+  int some_local_state=0;
+  func my_func(some_local_state);
+  std::thread t(my_func);
+  thread_guard g(t);
+  do_something_in_current_thread();
+}
+```
+
 * C++20 提供了 [std::jthread](https://en.cppreference.com/w/cpp/thread/jthread)，它会在析构函数中对线程 [join](https://en.cppreference.com/w/cpp/thread/thread/join)
 
 ```cpp
@@ -114,6 +152,7 @@ int main() {
 ```
 
 * [detach](https://en.cppreference.com/w/cpp/thread/thread/detach) 分离线程会让线程在后台运行，一般将这种在后台运行的线程称为守护线程，守护线程与主线程无法直接交互，也不能被 [join](https://en.cppreference.com/w/cpp/thread/thread/join)
+* dean, detach就是把线程变量和线程分离, 如果已经分离了, 就不能detach了, 同理要确认是joinable了再call detach.
 
 ```cpp
 std::thread t([] {});
